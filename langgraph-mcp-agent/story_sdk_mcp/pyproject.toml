@@ -1,0 +1,18 @@
+[project]
+name = "story-sdk-mcp"
+version = "0.1.0"
+description = "Story Protocol SDK MCP Server"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp[cli]",
+    "python-dotenv",
+    "web3",
+    "story-protocol-python-sdk @ git+https://github.com/storyprotocol/python-sdk.git",
+    "ruff>=0.9.7",
+    "pinata>=0.0.1",
+    "loguru>=0.7.3",
+    "multiformats>=0.3.1.post4",
+    "aiohttp>=3.11.12",
+    "py-multicodec>=0.2.1",
+    "py-multiformats-cid>=0.4.4",
+]
