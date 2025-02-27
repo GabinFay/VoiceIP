@@ -1,12 +1,6 @@
-import os
-import sys
-
-print("Current working directory:", os.getcwd())
-print("Python path:", sys.path)
-
-# Then try your imports
 from story_sdk_mcp.src.services.story_service import StoryService
 from dotenv import load_dotenv
+import os
 
 # Load environment variables
 load_dotenv()
@@ -18,15 +12,19 @@ async def register_audio_ip():
         private_key=os.getenv('WALLET_PRIVATE_KEY')
     )
     
-    # Read the audio file
-    with open('freeman.mp3', 'rb') as audio_file:
-        audio_data = audio_file.read()
+    # Use hardcoded IPFS URL instead of uploading
+    audio_uri = "ipfs://Qmcuzm3oknzQ8eRSekyjAYw37GPvG4eTn2EcEsNscyZFoY"
+    print(f"Using audio from IPFS: {audio_uri}")
+    
+    # # Read the audio file
+    # with open('freeman.mp3', 'rb') as audio_file:
+    #     audio_data = audio_file.read()
     
     try:
-        # Upload audio to IPFS
-        print("Uploading audio to IPFS...")
-        audio_uri = story_service.upload_image_to_ipfs(audio_data)  # We can use the same function for any file
-        print(f"Audio uploaded to IPFS: {audio_uri}")
+        # # Upload audio to IPFS
+        # print("Uploading audio to IPFS...")
+        # audio_uri = story_service.upload_image_to_ipfs(audio_data)  # We can use the same function for any file
+        # print(f"Audio uploaded to IPFS: {audio_uri}")
         
         # Create metadata
         print("Creating metadata...")

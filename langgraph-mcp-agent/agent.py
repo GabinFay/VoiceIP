@@ -892,46 +892,86 @@ def create_graph(ipfs_tools):
                     ]
                 }
 
-    class PurchaseLicense:
+    class MintLicenseTokens:
         async def ainvoke(self, state, config=None):
-            # Get the IP ID from the saved file
-            try:
-                with open('audio_ip.json', 'r') as f:
-                    ip_data = json.load(f)
-                    ip_id = ip_data['ip_id']
-                    license_terms_id = ip_data['license_terms_ids'][0]
-            except Exception as e:
+            print("Minting license tokens...")
+
+            # Get the minting data from the previous message
+            minting_data = None
+            for message in reversed(state["messages"]):
+                if (
+                    isinstance(message, ToolMessage)
+                    and hasattr(message, "additional_kwargs")
+                    and "minting_data" in message.additional_kwargs
+                ):
+                    minting_data = message.additional_kwargs["minting_data"]
+                    break
+
+            if (
+                not minting_data
+                or not minting_data.get("ip_id")
+                or not minting_data.get("license_terms_ids")
+            ):
                 return {
                     "messages": [
                         AIMessage(
-                            content=f"Error loading IP data: {str(e)}"
+                            content="Failed to extract IP ID or license terms IDs from previous steps."
                         )
                     ]
                 }
 
             try:
-                # Mint license tokens
-                result = await mint_license_tokens_tool.ainvoke({
-                    'licensor_ip_id': ip_id,
-                    'license_terms_id': license_terms_id
-                })
+                # Extract the parameters
+                ip_id = minting_data["ip_id"]
+                license_terms_id = (
+                    minting_data["license_terms_ids"][0]
+                    if minting_data["license_terms_ids"]
+                    else None
+                )
+
+                if not license_terms_id:
+                    return {
+                        "messages": [
+                            AIMessage(
+                                content="No license terms ID available for minting license tokens."
+                            )
+                        ]
+                    }
+
+                # Call the mint_license_tokens tool
+                result = await mint_license_tokens_tool.ainvoke(
+                    {"licensor_ip_id": ip_id, "license_terms_id": license_terms_id}
+                )
                 
+                # Print the mint license tokens result
+                print(f"\n--- Mint License Tokens Tool Result ---\n{result}\n----------------------------")
+
+                # Extract Transaction Hash for license token
+                import re
+
+                tx_hash_match = re.search(r"Transaction Hash: ([a-fA-F0-9]+)", result)
+                if tx_hash_match:
+                    tx_hash = tx_hash_match.group(1)
+                    # Print the transaction link in the requested format
+                    print(f"@https://aeneid.storyscan.xyz/tx/0x{tx_hash}")
+
                 return {
                     "messages": [
                         ToolMessage(
                             content=result,
                             name="mint_license_tokens",
-                            tool_call_id=str(uuid.uuid4())
+                            tool_call_id=str(uuid.uuid4()),
                         )
                     ]
                 }
+
             except Exception as e:
                 return {
                     "messages": [
                         ToolMessage(
-                            content=f"Error purchasing license: {str(e)}",
+                            content=f"Error minting license tokens: {str(e)}",
                             name="mint_license_tokens",
-                            tool_call_id=str(uuid.uuid4())
+                            tool_call_id=str(uuid.uuid4()),
                         )
                     ]
                 }
@@ -946,7 +986,9 @@ def create_graph(ipfs_tools):
     workflow.add_node("create_metadata", RunnableLambda(CreateMetadata().ainvoke))
     workflow.add_node("negotiate_terms", RunnableLambda(NegotiateTerms().ainvoke))
     workflow.add_node("mint_register_ip", RunnableLambda(MintRegisterIP().ainvoke))
-    workflow.add_node("purchase_license", RunnableLambda(PurchaseLicense().ainvoke))
+    workflow.add_node(
+        "mint_license_tokens", RunnableLambda(MintLicenseTokens().ainvoke)
+    )
 
     # Start -> call LLM to generate image
     workflow.add_edge(START, "call_llm")
@@ -986,10 +1028,10 @@ def create_graph(ipfs_tools):
     workflow.add_edge("negotiate_terms", "mint_register_ip")
 
     # Mint and register IP -> mint license tokens
-    workflow.add_edge("mint_register_ip", "purchase_license")
+    workflow.add_edge("mint_register_ip", "mint_license_tokens")
 
     # Mint license tokens -> END
-    workflow.add_edge("purchase_license", END)
+    workflow.add_edge("mint_license_tokens", END)
 
     # Add a new node to handle failed generation
     def handle_failed_generation(state):
@@ -1028,12 +1070,15 @@ def create_graph(ipfs_tools):
 
 
 async def run_agent():
+    # Create the MCP client and keep it open for the entire session
     async with MultiServerMCPClient() as client:
+        # Connect to the server
         await client.connect_to_server(
             "story_server",
             command="python",
             args=["../story-sdk-mcp/server.py"],
         )
+        # Get all required tools
         ipfs_tools = [
             tool
             for tool in client.get_tools()
@@ -1046,35 +1091,35 @@ async def run_agent():
             ]
         ]
 
+        # Create the graph with the tools
         graph = create_graph(ipfs_tools)
-        
-        # Ask user which flow they want
-        print("\n=== Story Protocol Interaction ===")
-        print("1. Create new IP from image")
-        print("2. Purchase license for existing audio IP")
-        
-        choice = input("Enter your choice (1 or 2): ")
-        
-        if choice == "2":
-            # License purchasing flow
-            initial_input = {
-                "messages": [{"role": "user", "content": "Purchase license for audio IP"}]
-            }
-        else:
-            # Original image creation flow
-            image_prompt = input(
-                "What image would you like to create? (e.g., 'an anime style image of a person snowboarding'): "
-            )
-            if not image_prompt:
-                image_prompt = "an anime style image of a person snowboarding"
-                print(f"Using default prompt: '{image_prompt}'")
-            
-            initial_input = {
-                "messages": [{"role": "user", "content": f"Generate {image_prompt}"}]
-            }
 
-        config = {"configurable": {"thread_id": str(uuid.uuid4())}}
-        
+        thread_id = str(uuid.uuid4())
+
+        # Prompt the user for what image they want to create
+        print("\n=== Story IP Creator ===")
+        print(
+            "This tool will help you create and mint an image as an IP asset in the Story ecosystem.\n"
+        )
+
+        image_prompt = input(
+            "What image would you like to create? (e.g., 'an anime style image of a person snowboarding'): "
+        )
+        if not image_prompt:
+            image_prompt = (
+                "an anime style image of a person snowboarding"  # Default if empty
+            )
+            print(f"Using default prompt: '{image_prompt}'")
+
+        initial_input = {
+            "messages": [{"role": "user", "content": f"Generate {image_prompt}"}]
+        }
+
+        # Add thread_id to the config
+        config = {"configurable": {"thread_id": thread_id}}
+
+        print("\nStarting the creation process...\n")
+
         # Process all events and handle interrupts at any stage
         async def process_events(input_data):
             async for event in graph.astream(input_data, config, stream_mode="updates"):
